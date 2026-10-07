@@ -17,8 +17,6 @@ import os
 from getpass import getpass
 import traceback
 
-load_dotenv()
-DEBUG = os.getenv("DEBUG", "False").lower() in ("true", "1", "t")
 @tool("internet_search")
 def internet_search(query: str) -> str:
     """Search Google via SerpAPI for up to date information."""
@@ -41,76 +39,7 @@ def calculator(expression: str) -> str:
 class AgentState(TypedDict):
     messages: Annotated[List[BaseMessage], add_messages]
 
-def route(state: AgentState):
-    last = state["messages"][-1]
-    calls = getattr(last, "tool_calls", None) or []
-    return "tools" if calls else END
-
-def _short(msg: BaseMessage, max_len: int = 140) -> str:
-    """Compact one-line view of a message."""
-    role = type(msg).__name__.replace("Message", "").lower()
-    content = getattr(msg, "content", "")
-    if isinstance(content, list):
-        # some tool outputs can be list payloads
-        try:
-            content = json.dumps(content)
-        except Exception:
-            content = str(content)
-    text = str(content).replace("\n", " ").strip()
-    if len(text) > max_len:
-        text = text[: max_len - 3] + "..."
-    # include tool name or function call info when available
-    if hasattr(msg, "tool_calls") and getattr(msg, "tool_calls"):
-        tnames = [tc.get("name", "tool") for tc in msg.tool_calls]
-        return f"{role}: tool_calls -> {tnames}"
-    if isinstance(msg, ToolMessage):
-        return f"{role}({msg.name}): {text}"
-    return f"{role}: {text}"
-
-def print_state_snapshot(app, config, title: str):
-    """Print current graph state and memory for a given thread."""
-    snap = app.get_state(config)
-    values = snap.values or {}
-    msgs: List[BaseMessage] = values.get("messages", [])
-    print(f"\n=== {title} | state snapshot ===")
-    print(f"messages: {len(msgs)} total")
-    for i, m in enumerate(msgs[-5:], start=max(0, len(msgs)-5) + 1):
-        print(f"  {i:>3}: {_short(m)}")
-    # show routing info and queued tasks if present
-    nxt = getattr(snap, "next", None)
-    tasks = getattr(snap, "tasks", None)
-    if nxt:
-        print(f"next nodes: {list(nxt)}")
-    if tasks:
-        print(f"queued tasks: {tasks}")
-    # minimal memory view via checkpointer for this thread
-    # MemorySaver keeps one latest checkpoint per thread by default, so show existence
-    print("memory: in-memory checkpoint present for this thread")
-    
-def run_with_tracing(app, input_state: AgentState, config, title: str):
-    if DEBUG:
-        print(f"\n=== {title} | execution trace ===")
-    final = None
-    # stream_mode="updates" surfaces node-level updates
-    for event in app.stream(input_state, config=config, stream_mode="updates"):
-        for node, upd in event.items():
-            # upd is a dict like {"messages": [<new msg>]} or tool results
-            keys = list(upd.keys())
-            if DEBUG:
-                print(f"[enter {node}] updated: {keys}")
-            # if messages updated, print the last one briefly
-            msgs = upd.get("messages") or []
-            if DEBUG:
-                if msgs:
-                    print(f"  {_short(msgs[-1])}")
-            if DEBUG:
-                print(f"[leave {node}]")
-            final = upd
-    # show final assistant message from app.get_state
-    return final
-
 def load_api_keys():
-    load_dotenv()
     serp_api_key = os.getenv("SERPAPI_API_KEY")
     open_api_key = os.getenv('OPENAI_API_KEY')
     if not open_api_key:
@@ -129,29 +58,125 @@ def load_api_keys():
     return open_api_key, serp_api_key
 
 
-def build_agent(model_name: str):
-    """Build the tool-enabled LangGraph application for one CLI session."""
-    tools = [internet_search, calculator]
-    llm = ChatOpenAI(
-        model=model_name,
-        temperature=0,
-        max_tokens=800,
-    ).bind_tools(tools, tool_choice="auto")
+class ConversationAgent:
+    """One stateful, tool-enabled conversation session."""
 
-    def llm_node(state: AgentState) -> AgentState:
-        ai_message = llm.invoke(state["messages"])
-        return {"messages": [ai_message]}
+    def __init__(
+        self,
+        model_name: str,
+        thread_id: str = "interactive-session",
+        debug: bool = False,
+    ):
+        self.debug = debug
+        self.config = {
+            "configurable": {"thread_id": thread_id},
+            "recursion_limit": 20,
+            "max_concurrency": 1,
+        }
+        self.app = self._build_app(model_name)
 
-    graph = StateGraph(AgentState)
-    graph.add_node("llm", llm_node)
-    graph.add_node("tools", ToolNode(tools=tools, handle_tool_errors=True))
-    graph.add_edge(START, "llm")
-    graph.add_conditional_edges("llm", route, {"tools": "tools", END: END})
-    graph.add_edge("tools", "llm")
-    return graph.compile(checkpointer=MemorySaver())
+    @staticmethod
+    def _route(state: AgentState):
+        last = state["messages"][-1]
+        calls = getattr(last, "tool_calls", None) or []
+        return "tools" if calls else END
+
+    @staticmethod
+    def _short(message: BaseMessage, max_len: int = 140) -> str:
+        """Return a compact one-line representation of a graph message."""
+        role = type(message).__name__.replace("Message", "").lower()
+        content = getattr(message, "content", "")
+        if isinstance(content, list):
+            try:
+                content = json.dumps(content)
+            except Exception:
+                content = str(content)
+
+        text = str(content).replace("\n", " ").strip()
+        if len(text) > max_len:
+            text = text[: max_len - 3] + "..."
+        if getattr(message, "tool_calls", None):
+            names = [call.get("name", "tool") for call in message.tool_calls]
+            return f"{role}: tool_calls -> {names}"
+        if isinstance(message, ToolMessage):
+            return f"{role}({message.name}): {text}"
+        return f"{role}: {text}"
+
+    def _print_state_snapshot(self, title: str) -> None:
+        """Print the current LangGraph state for this conversation session."""
+        snapshot = self.app.get_state(self.config)
+        values = snapshot.values or {}
+        messages: List[BaseMessage] = values.get("messages", [])
+        print(f"\n=== {title} | state snapshot ===")
+        print(f"messages: {len(messages)} total")
+        for index, message in enumerate(
+            messages[-5:], start=max(0, len(messages) - 5) + 1
+        ):
+            print(f"  {index:>3}: {self._short(message)}")
+        if snapshot.next:
+            print(f"next nodes: {list(snapshot.next)}")
+        if snapshot.tasks:
+            print(f"queued tasks: {snapshot.tasks}")
+        print("memory: in-memory checkpoint present for this thread")
+
+    def ask(self, question: str) -> str:
+        """Run one turn and return the final assistant response."""
+        final = self._run_with_tracing(
+            {"messages": [HumanMessage(content=question)]}
+        )
+        messages = final.get("messages") if final else None
+        if not messages:
+            raise RuntimeError("Agent completed without an assistant response.")
+        return messages[-1].content
+
+    def _build_app(self, model_name: str):
+        tools = [internet_search, calculator]
+        llm = ChatOpenAI(
+            model=model_name,
+            temperature=0,
+            max_tokens=800,
+        ).bind_tools(tools, tool_choice="auto")
+
+        def llm_node(state: AgentState) -> AgentState:
+            ai_message = llm.invoke(state["messages"])
+            return {"messages": [ai_message]}
+
+        graph = StateGraph(AgentState)
+        graph.add_node("llm", llm_node)
+        graph.add_node("tools", ToolNode(tools=tools, handle_tool_errors=True))
+        graph.add_edge(START, "llm")
+        graph.add_conditional_edges(
+            "llm",
+            self._route,
+            {"tools": "tools", END: END},
+        )
+        graph.add_edge("tools", "llm")
+        return graph.compile(checkpointer=MemorySaver())
+
+    def _run_with_tracing(self, input_state: AgentState):
+        if self.debug:
+            print("\n=== Question | execution trace ===")
+
+        final = None
+        for event in self.app.stream(
+            input_state,
+            config=self.config,
+            stream_mode="updates",
+        ):
+            for node, update in event.items():
+                if self.debug:
+                    print(f"[enter {node}] updated: {list(update.keys())}")
+                    messages = update.get("messages") or []
+                    if messages:
+                        print(f"  {self._short(messages[-1])}")
+                    print(f"[leave {node}]")
+                final = update
+
+        return final
 
 
 def main():
+    load_dotenv()
     try:
         load_api_keys()
     except (EOFError, KeyboardInterrupt):
@@ -163,9 +188,8 @@ def main():
         print("AI_MODEL is required. Set it in .env.")
         return
 
-    app = build_agent(model_name)
-    thread_id = "interactive-session"
-    cfg = {"configurable": {"thread_id": thread_id}}
+    debug = os.getenv("DEBUG", "false").lower() in ("true", "1", "t")
+    agent = ConversationAgent(model_name, debug=debug)
     print("Starting interactive conversation agent...")
     print("Type 'exit' or 'quit' to terminate the conversation.")
     while True:
@@ -179,20 +203,14 @@ def main():
         if question.lower().strip() in ("exit", "quit"):
             break
         try:
-            answer = run_with_tracing(
-                app,
-                {"messages": [HumanMessage(content=question)]},
-                config={**cfg, "recursion_limit": 20, "max_concurrency": 1},
-                title="Question",
-            )
-            print("\nResponse:\n", answer["messages"][-1].content)
+            response = agent.ask(question)
+            print("\nResponse:\n", response)
         except KeyboardInterrupt:
             print("\nRequest cancelled.")
         except Exception:
             print("\nUnable to complete that request. Please try again.")
-            if DEBUG:
+            if debug:
                 traceback.print_exc()
-        #print_state_snapshot(app, cfg, title="MAIN THREAD memory view")
 
 if __name__ == "__main__":
     main()
