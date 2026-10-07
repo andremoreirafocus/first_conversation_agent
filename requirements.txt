@@ -1,0 +1,6 @@
+langgraph==0.6.7
+langchain-openai==0.3.33
+python-dotenv==1.1.1
+langchain_community
+google-search-results
+numexpr
