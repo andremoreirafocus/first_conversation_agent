@@ -128,29 +128,42 @@ def load_api_keys():
     print("✅ API keys loaded successfully!")
     return open_api_key, serp_api_key
 
-def main():
-    def llm_node(state: AgentState) -> AgentState:
-        ai_messages = llm.invoke(state["messages"])
-        return {"messages": [ai_messages]}
 
-    try:
-         _, _ = load_api_keys()
-         AI_MODEL = os.getenv("AI_MODEL")
-    except (EOFError, KeyboardInterrupt):
-        print("\nSetup cancelled.")
-        return
-   
+def build_agent(model_name: str):
+    """Build the tool-enabled LangGraph application for one CLI session."""
     tools = [internet_search, calculator]
-    llm = ChatOpenAI(model=AI_MODEL, temperature=0, max_tokens=800).bind_tools(tools, tool_choice="auto")
-    tool_node = ToolNode(tools=tools, handle_tool_errors = True)
+    llm = ChatOpenAI(
+        model=model_name,
+        temperature=0,
+        max_tokens=800,
+    ).bind_tools(tools, tool_choice="auto")
+
+    def llm_node(state: AgentState) -> AgentState:
+        ai_message = llm.invoke(state["messages"])
+        return {"messages": [ai_message]}
+
     graph = StateGraph(AgentState)
     graph.add_node("llm", llm_node)
-    graph.add_node("tools", tool_node)
+    graph.add_node("tools", ToolNode(tools=tools, handle_tool_errors=True))
     graph.add_edge(START, "llm")
     graph.add_conditional_edges("llm", route, {"tools": "tools", END: END})
     graph.add_edge("tools", "llm")
-    checkpointer = MemorySaver()
-    app = graph.compile(checkpointer=checkpointer)
+    return graph.compile(checkpointer=MemorySaver())
+
+
+def main():
+    try:
+        load_api_keys()
+    except (EOFError, KeyboardInterrupt):
+        print("\nSetup cancelled.")
+        return
+
+    model_name = os.getenv("AI_MODEL")
+    if not model_name:
+        print("AI_MODEL is required. Set it in .env.")
+        return
+
+    app = build_agent(model_name)
     thread_id = "interactive-session"
     cfg = {"configurable": {"thread_id": thread_id}}
     print("Starting interactive conversation agent...")
