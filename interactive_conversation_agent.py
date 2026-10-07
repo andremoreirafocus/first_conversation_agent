@@ -3,9 +3,9 @@ import os
 import math
 import json
 import numexpr
-from typing import List, Dict, Any, TypedDict, Annotated
-from langchain_openai import ChatOpenAI, tools
-from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, ToolMessage
+from typing import List, TypedDict, Annotated
+from langchain_openai import ChatOpenAI
+from langchain_core.messages import BaseMessage, HumanMessage, ToolMessage
 from langchain_core.tools import tool
 from langchain_community.utilities import SerpAPIWrapper
 from langgraph.graph import StateGraph, START, END
@@ -14,6 +14,8 @@ from langgraph.prebuilt import ToolNode
 from langgraph.checkpoint.memory import MemorySaver
 from dotenv import load_dotenv
 import os
+from getpass import getpass
+import traceback
 
 load_dotenv()
 DEBUG = os.getenv("DEBUG", "False").lower() in ("true", "1", "t")
@@ -113,13 +115,13 @@ def load_api_keys():
     open_api_key = os.getenv('OPENAI_API_KEY')
     if not open_api_key:
         print("⚠️ OPENAI_API_KEY not found. You can set it with `%env` in the notebook or enter it below.")
-        open_api_key = input("Enter your OPENAI_API_KEY: ").strip()
+        open_api_key = getpass("Enter your OPENAI_API_KEY: ").strip()
         os.environ["OPENAI_API_KEY"] = open_api_key
     else:
         print("✅ OPENAI_API_KEY loaded successfully.")
     if not serp_api_key:
         print("⚠️ SERPAPI_API_KEY not found. You can set it with `%env` in the notebook or enter it below.")
-        serp_api_key = input("Enter your SERPAPI_API_KEY: ").strip()
+        serp_api_key = getpass("Enter your SERPAPI_API_KEY: ").strip()
         os.environ["SERPAPI_API_KEY"] = serp_api_key
     else:
         print("✅ SERPAPI_API_KEY loaded successfully.")
@@ -131,10 +133,15 @@ def main():
         ai_messages = llm.invoke(state["messages"])
         return {"messages": [ai_messages]}
 
-    load_api_keys()
+    try:
+         _, _ = load_api_keys()
+    except (EOFError, KeyboardInterrupt):
+        print("\nSetup cancelled.")
+        return
+   
     tools = [internet_search, calculator]
     llm = ChatOpenAI(model="gpt-4o", temperature=0, max_tokens=800).bind_tools(tools, tool_choice="auto")
-    tool_node = ToolNode(tools=tools)
+    tool_node = ToolNode(tools=tools, handle_tool_errors = True)
     graph = StateGraph(AgentState)
     graph.add_node("llm", llm_node)
     graph.add_node("tools", tool_node)
@@ -143,20 +150,34 @@ def main():
     graph.add_edge("tools", "llm")
     checkpointer = MemorySaver()
     app = graph.compile(checkpointer=checkpointer)
-    cfg = {"configurable": {"thread_id": "nyc-weather-session"}}
+    thread_id = "interactive-session"
+    cfg = {"configurable": {"thread_id": thread_id}}
     print("Starting interactive conversation agent...")
-    print("Type 'exit' to quit the conversation.")
+    print("Type 'exit' or 'quit' to terminate the conversation.")
     while True:
-        question = input("\nYour question: ")
-        if question.lower() == "exit":
+        try:
+            question = input("\nYour question: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\nConversation ended due to user interruption.")
             break
-        answer = run_with_tracing(
-            app,
-            {"messages": [HumanMessage(content=question)]},
-            config={**cfg, "recursion_limit": 20, "max_concurrency": 1},
-            title="Question",
-        )
-        print("\nResponse:\n", answer["messages"][-1].content)
+        if not question.strip():
+            continue
+        if question.lower().strip() in ("exit", "quit"):
+            break
+        try:
+            answer = run_with_tracing(
+                app,
+                {"messages": [HumanMessage(content=question)]},
+                config={**cfg, "recursion_limit": 20, "max_concurrency": 1},
+                title="Question",
+            )
+            print("\nResponse:\n", answer["messages"][-1].content)
+        except KeyboardInterrupt:
+            print("\nRequest cancelled.")
+        except Exception:
+            print("\nUnable to complete that request. Please try again.")
+            if DEBUG:
+                traceback.print_exc()
         #print_state_snapshot(app, cfg, title="MAIN THREAD memory view")
 
 if __name__ == "__main__":
