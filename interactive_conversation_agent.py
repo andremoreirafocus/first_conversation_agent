@@ -135,12 +135,13 @@ def main():
 
     try:
          _, _ = load_api_keys()
+         AI_MODEL = os.getenv("AI_MODEL")
     except (EOFError, KeyboardInterrupt):
         print("\nSetup cancelled.")
         return
    
     tools = [internet_search, calculator]
-    llm = ChatOpenAI(model="gpt-4o", temperature=0, max_tokens=800).bind_tools(tools, tool_choice="auto")
+    llm = ChatOpenAI(model=AI_MODEL, temperature=0, max_tokens=800).bind_tools(tools, tool_choice="auto")
     tool_node = ToolNode(tools=tools, handle_tool_errors = True)
     graph = StateGraph(AgentState)
     graph.add_node("llm", llm_node)
