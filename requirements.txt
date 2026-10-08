@@ -4,3 +4,4 @@ python-dotenv==1.1.1
 langchain_community
 google-search-results
 numexpr
+streamlit

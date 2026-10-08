@@ -2,13 +2,14 @@
 
 A small LangGraph learning project with an interactive terminal agent and its original tutorial script.
 
-Use `interactive_conversation_agent.py` for normal use. `first_agent.py` is retained as a **legacy** walkthrough that led to the CLI version.
+Use `interactive_conversation_agent.py` for the terminal interface or `streamlit_app.py` for the browser interface. `first_agent.py` is retained as a **legacy** walkthrough that led to the current agent.
 
 ## Project files
 
 | File | Status | Purpose |
 | --- | --- | --- |
 | `interactive_conversation_agent.py` | Active | The one-user terminal CLI: environment setup, credential prompts, and terminal input/output. |
+| `streamlit_app.py` | Active | Browser chat interface that preserves the agent and rendered messages in each Streamlit session. |
 | `conversation_agent.py` | Active | Reusable `ConversationAgent` implementation: LangGraph workflow, memory, and tracing. It receives its tools through its constructor. |
 | `agent_tools.py` | Active | Individual tool definitions, currently web search and calculator capabilities. |
 | `first_agent.py` | Legacy | A sequential tutorial: basic model call, manual tool loops, then a fixed-prompt LangGraph example. It runs API calls immediately. |
@@ -21,7 +22,7 @@ Use `interactive_conversation_agent.py` for normal use. `first_agent.py` is reta
 - An OpenAI API key with access to the model selected by `AI_MODEL`.
 - A [SerpAPI](https://serpapi.com/) API key for Google search.
 
-Both scripts make real external requests. OpenAI and SerpAPI usage may incur charges.
+The executable scripts make real external requests. OpenAI and SerpAPI usage may incur charges.
 
 ## Setup
 
@@ -80,7 +81,19 @@ Tool calls execute with `max_concurrency=1`. This is intentional because the ins
 
 The model selected by `AI_MODEL` chooses tools automatically. Tool and API errors are reported without ending the normal conversation loop; enable debug mode to print their traceback.
 
-The CLI explicitly selects `internet_search` and `calculator` from `agent_tools.py` and passes that tuple to `ConversationAgent`. Other entry points can select or filter a different tool set before constructing the agent.
+Both active interfaces explicitly select `internet_search` and `calculator` from `agent_tools.py` and pass that tuple to `ConversationAgent`. Other entry points can select or filter a different tool set before constructing the agent.
+
+## Streamlit interface
+
+Run the browser interface from the project root:
+
+```bash
+streamlit run streamlit_app.py
+```
+
+It uses the same `.env` configuration as the CLI. The app keeps a `ConversationAgent` and the rendered chat history in Streamlit session state, so follow-up questions retain context until the browser session ends. Select **New conversation** from the sidebar to clear that session's history and start again.
+
+For deployment, provide `OPENAI_API_KEY`, `SERPAPI_API_KEY`, and `AI_MODEL` as environment variables or through the host's secure secrets facility; never commit credentials to the repository.
 
 ## Legacy tutorial: `first_agent.py`
 
@@ -103,7 +116,7 @@ python3 first_agent.py
 
 ## Current limitations
 
-- Conversation memory is in memory only; restarting the CLI clears it.
+- Conversation memory is in memory only; restarting the CLI or ending a browser session clears it.
 - Search responses are text snippets, not structured and cited factual data.
 - The project has no automated tests.
 - Depending on the installed LangChain/LangGraph versions, startup can show a dependency deprecation warning. Updating the compatible LangGraph and LangChain packages is the appropriate long-term remedy.
