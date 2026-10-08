@@ -8,7 +8,9 @@ Use `interactive_conversation_agent.py` for normal use. `first_agent.py` is reta
 
 | File | Status | Purpose |
 | --- | --- | --- |
-| `interactive_conversation_agent.py` | Active | A one-user terminal conversation agent with in-process memory, web search, and calculator tools. |
+| `interactive_conversation_agent.py` | Active | The one-user terminal CLI: environment setup, credential prompts, and terminal input/output. |
+| `conversation_agent.py` | Active | Reusable `ConversationAgent` implementation: LangGraph workflow, memory, and tracing. It receives its tools through its constructor. |
+| `agent_tools.py` | Active | Tool definitions and `DEFAULT_TOOLS`, currently containing web search and calculator capabilities. |
 | `first_agent.py` | Legacy | A sequential tutorial: basic model call, manual tool loops, then a fixed-prompt LangGraph example. It runs API calls immediately. |
 | `requirements.txt` | Active | Python dependencies. |
 | `.gitignore` | Active | Excludes `.env`, virtual environments, and common editor/cache files. |
@@ -45,7 +47,7 @@ DEBUG=true
 
 ## Interactive CLI
 
-Run the active agent:
+Run the active CLI:
 
 ```bash
 python3 interactive_conversation_agent.py
