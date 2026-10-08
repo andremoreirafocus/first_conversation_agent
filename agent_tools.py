@@ -3,7 +3,7 @@ import os
 
 import numexpr
 from langchain_community.utilities import SerpAPIWrapper
-from langchain_core.tools import BaseTool, tool
+from langchain_core.tools import tool
 
 
 @tool("internet_search")
@@ -25,6 +25,3 @@ def calculator(expression: str) -> str:
         local_dict=local_dict,
     )
     return str(output)
-
-
-DEFAULT_TOOLS: tuple[BaseTool, ...] = (internet_search, calculator)

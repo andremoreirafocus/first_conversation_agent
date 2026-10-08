@@ -10,7 +10,7 @@ Use `interactive_conversation_agent.py` for normal use. `first_agent.py` is reta
 | --- | --- | --- |
 | `interactive_conversation_agent.py` | Active | The one-user terminal CLI: environment setup, credential prompts, and terminal input/output. |
 | `conversation_agent.py` | Active | Reusable `ConversationAgent` implementation: LangGraph workflow, memory, and tracing. It receives its tools through its constructor. |
-| `agent_tools.py` | Active | Tool definitions and `DEFAULT_TOOLS`, currently containing web search and calculator capabilities. |
+| `agent_tools.py` | Active | Individual tool definitions, currently web search and calculator capabilities. |
 | `first_agent.py` | Legacy | A sequential tutorial: basic model call, manual tool loops, then a fixed-prompt LangGraph example. It runs API calls immediately. |
 | `requirements.txt` | Active | Python dependencies. |
 | `.gitignore` | Active | Excludes `.env`, virtual environments, and common editor/cache files. |
@@ -79,6 +79,8 @@ Tool calls execute with `max_concurrency=1`. This is intentional because the ins
 - `calculator(expression)` evaluates a numeric expression with `numexpr`; `pi` and `e` are available as constants.
 
 The model selected by `AI_MODEL` chooses tools automatically. Tool and API errors are reported without ending the normal conversation loop; enable debug mode to print their traceback.
+
+The CLI explicitly selects `internet_search` and `calculator` from `agent_tools.py` and passes that tuple to `ConversationAgent`. Other entry points can select or filter a different tool set before constructing the agent.
 
 ## Legacy tutorial: `first_agent.py`
 
